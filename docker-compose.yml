@@ -1,0 +1,78 @@
+version: '3'
+
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.9.0
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+
+    # ✅ NEW: Use gcloud authentication (ADC)
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/.config/gcloud/application_default_credentials.json
+
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+
+    # ✅ NEW: Mount your gcloud credentials
+    - C:\Users\yasmi\AppData\Roaming\gcloud:/opt/airflow/.config/gcloud
+
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+
+services:
+
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  redis:
+    image: redis:latest
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+
+  airflow-worker:
+    <<: *airflow-common
+    command: celery worker
+
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -c "
+      airflow db init &&
+      airflow users create \
+      --username airflow \
+      --password airflow \
+      --firstname admin \
+      --lastname user \
+      --role Admin \
+      --email admin@example.com
+      "
